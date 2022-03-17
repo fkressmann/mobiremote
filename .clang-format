@@ -1,0 +1,4 @@
+BreakBeforeBraces: Attach
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+IndentCaseLabels: true
+ColumnLimit: 0
