@@ -14,7 +14,10 @@
 
 const String commandPrefix = MQTT_PREFIX + String("cmnd");
 const char *deviceName = "esp-mobiremote";
-int tempSet;
+struct {
+  int tempSet;
+  boolean powerState;
+} config;
 
 ESP8266WiFiMulti wifiMulti;
 WiFiClient wifiClient;
@@ -31,13 +34,12 @@ void log(String line) {
 }
 
 void writeSettingsToEeprom() {
-  EEPROM.begin(sizeof(tempSet));
-  EEPROM.put(0, tempSet);
+  EEPROM.begin(sizeof(config));
+  EEPROM.put(0, config);
   EEPROM.commit();
   EEPROM.end();
-  log(String(tempSet) + " written to flash.");
+  log("Config " + String(config.tempSet) + ":" + String(config.powerState) + " written to flash.");
 }
-
 
 void reconnectMqtt() {
   if (!mqttClient.connected()) {
@@ -91,35 +93,62 @@ void changeSetTemperature(int delta) {
 }
 
 void handleNewSetTemp(int newSetTemp) {
-  if (newSetTemp == tempSet || newSetTemp < -10 || newSetTemp > 20) {
-    log("Bad newTemp: " + String(newSetTemp) + " (oldTemp: " + String(tempSet) + ")");
+  if (!config.powerState) {
+    log("Cannot set temp, mobicool is off");
     return;
   }
-  int delta = newSetTemp - tempSet;
+  if (newSetTemp == config.tempSet || newSetTemp < -10 || newSetTemp > 20) {
+    log("Bad newTemp: " + String(newSetTemp) + " (oldTemp: " + String(config.tempSet) + ")");
+    return;
+  }
+  int delta = newSetTemp - config.tempSet;
   changeSetTemperature(delta);
-  tempSet = newSetTemp;
+  config.tempSet = newSetTemp;
   writeSettingsToEeprom();
 }
 
-void callback(char *topic, byte *payload, unsigned int length) {
+void handleNewPowerState(boolean newState) {
+  if (config.powerState == newState) {
+    log("Power is already " + String(newState));
+  } else {
+    pressButton(BUTTON_POWER, true);
+    config.powerState = newState;
+    writeSettingsToEeprom();
+  }
+}
+
+void sendInvalidCommandMessage(char *slashPointer, char *pl) {
+  log("Invalid command: " + String(slashPointer) + "=" + String(pl));
+}
+
+    void callback(char *topic, byte *payload, unsigned int length) {
   digitalWrite(LED, LOW);
+
+  // Parse payload to c string
   char pl[length + 1];
   for (unsigned int i = 0; i < length; i++) {
     pl[i] = payload[i];
   }
   pl[length] = '\0';
+  int plInt = atoi(pl);
 
   char *slashPointer = strrchr(topic, '/');
+  if (length == 0) {
+    sendInvalidCommandMessage(slashPointer, pl);
+  }
 
   if (strcmp(slashPointer + 1, "set") == 0) {
-    handleNewSetTemp(atoi(pl));
-  } else if (strcmp(slashPointer + 1, "init") == 0) {
-    tempSet = atoi(pl);
+    handleNewSetTemp(plInt);
+  } else if (strcmp(slashPointer + 1, "inittemp") == 0) {
+    config.tempSet = plInt;
+    writeSettingsToEeprom();
+  } else if (strcmp(slashPointer + 1, "initpwr") == 0) {
+    config.powerState = plInt;
     writeSettingsToEeprom();
   } else if (strcmp(slashPointer + 1, "pwr") == 0) {
-    pressButton(BUTTON_POWER, true);
+    handleNewPowerState(plInt);
   } else {
-    log("Invalid command: " + String(slashPointer) + "=" + String(pl));
+    sendInvalidCommandMessage(slashPointer, pl);
   }
   digitalWrite(LED, HIGH);
 }
@@ -142,13 +171,6 @@ void setup() {
   ArduinoOTA.setHostname(deviceName);
   ArduinoOTA.begin();
 
-  // Read settings from EEPROM
-  EEPROM.begin(sizeof(tempSet));
-  EEPROM.get(0, tempSet);
-  EEPROM.end();
-  Serial.println("TempSet from EEPROM: " + String(tempSet));
-  //
-
   pinMode(BUTTON_POWER, OUTPUT);
   pinMode(BUTTON_SET, OUTPUT);
   pinMode(BUTTON_UP, OUTPUT);
@@ -158,6 +180,14 @@ void setup() {
 
   mqttClient.setServer(MQTT_SERVER, 1883);
   mqttClient.setCallback(callback);
+  reconnectMqtt();
+
+  // Read settings from EEPROM
+  EEPROM.begin(sizeof(config));
+  EEPROM.get(0, config);
+  EEPROM.end();
+  log("Config " + String(config.tempSet) + ":" + String(config.powerState) + " loaded from flash.");
+  //
 
   Serial.println("Setup finished, looping now");
 }
