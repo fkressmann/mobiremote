@@ -10,10 +10,13 @@
 #define BUTTON_SET D7
 #define BUTTON_UP D2
 #define BUTTON_DOWN D3
+#define NTC A0
 #define LED D4
 
 const String commandPrefix = MQTT_PREFIX + String("cmnd");
 const char *deviceName = "esp-mobiremote";
+unsigned long ntcRead = 0;
+unsigned int ntcCount = 0;
 struct {
   int tempSet;
   boolean powerState;
@@ -117,11 +120,34 @@ void handleNewPowerState(boolean newState) {
   }
 }
 
+float adcToTemperature(float adcReading) {
+  // 3.3v / 1024 (10bit ADC)
+  float voltage = 0.00322265625 * adcReading;
+  float resistance = -((voltage * 10000) / (voltage - 3.3));
+  // Steinhart–Hart equation
+  float temp = (1 / ((log(resistance / 10000) / 3977) + (1 / (25 + 273.15)))) - 273.15;
+  return temp;
+}
+
+void handleNtc() {
+  if (ntcCount < 1000) {
+    yield();
+    ntcRead += analogRead(NTC);
+    ntcCount += 1;
+  } else {
+    float analogReading = (float)ntcRead / ntcCount;
+    float temp = adcToTemperature(analogReading);
+    sendData("temp", String(temp), false);
+    ntcRead = 0;
+    ntcCount = 0;
+  }
+}
+
 void sendInvalidCommandMessage(char *slashPointer, char *pl) {
   log("Invalid command: " + String(slashPointer) + "=" + String(pl));
 }
 
-    void callback(char *topic, byte *payload, unsigned int length) {
+void callback(char *topic, byte *payload, unsigned int length) {
   digitalWrite(LED, LOW);
 
   // Parse payload to c string
@@ -196,4 +222,7 @@ void loop() {
   ArduinoOTA.handle();
   reconnectMqtt();
   mqttClient.loop();
+  if(millis() % 10 == 0) {
+    handleNtc();
+  }
 }
