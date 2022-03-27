@@ -22,6 +22,11 @@ struct {
   boolean powerState;
 } config;
 
+// linear approximation coefficents to this chips ADC charactersitics |(optimized for +10° - 0°C)
+// Allows accuracy up to 0.1°C
+const float m = -32.807619953525176;
+const float b = -81.15865319571508;
+
 ESP8266WiFiMulti wifiMulti;
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
@@ -122,10 +127,10 @@ void handleNewPowerState(boolean newState) {
 
 float adcToTemperature(float adcReading) {
   // 3.3v / 1024 (10bit ADC)
-  float voltage = 0.00322265625 * adcReading;
+  float voltage = (0.00322265625 * adcReading);
+  // sendData("voltage", String(voltage, 4), false); //for calibration reasons
   float resistance = -((voltage * 10000) / (voltage - 3.3));
-  // Steinhart–Hart equation
-  float temp = (1 / ((log(resistance / 10000) / 3977) + (1 / (25 + 273.15)))) - 273.15;
+  float temp = (m * voltage) - b;
   return temp;
 }
 
@@ -137,7 +142,7 @@ void handleNtc() {
   } else {
     float analogReading = (float)ntcRead / ntcCount;
     float temp = adcToTemperature(analogReading);
-    sendData("temp", String(temp), false);
+    sendData("temp", String(temp, 1), false);
     ntcRead = 0;
     ntcCount = 0;
   }
