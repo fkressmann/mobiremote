@@ -79,6 +79,6 @@ board.
 
 - [x] Calibrate temp measurements
 - [x] Send temp only when changed
-- [ ] Use WiFi manager instead of fixed WiFi credentails
-- [ ] Use WiFi manager to set mqtt settings
-- [ ] Add soem pics here
+- [x] Use WiFi manager instead of fixed WiFi credentails
+- [x] Use WiFi manager to set mqtt settings
+- [ ] Add some pics here

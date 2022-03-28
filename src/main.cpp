@@ -2,7 +2,7 @@
 #include <ArduinoOTA.h>
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>
-#include <ESP8266WiFiMulti.h>
+#include <ESP_WiFiManager.h>
 #include <PubSubClient.h>
 #include <credentials.h>
 
@@ -13,7 +13,12 @@
 #define NTC A0
 #define LED D4
 
-const String commandPrefix = MQTT_PREFIX + String("cmnd");
+#define MQTT_SERVER_LABEL "mq_server"
+#define MQTT_USER_LABEL "mq_user"
+#define MQTT_PASSWORD_LABEL "mq_pw"
+#define MQTT_PREFIX_LABEL "mq_pref"
+boolean saveConfig = false;
+
 const char *deviceName = "esp-mobiremote";
 unsigned long ntcRead = 0;
 unsigned int ntcCount = 0;
@@ -21,20 +26,26 @@ float prevTemp = 0;
 struct {
   int tempSet;
   boolean powerState;
+  char mqttServer[30];
+  char mqttUser[30];
+  char mqttPassword[30];
+  char mqttPrefix[30];
 } config;
+String commandPrefix;
 
 // linear approximation coefficents to this chips ADC charactersitics |(optimized for +10° - 0°C)
 // Allows accuracy up to 0.1°C
 const float m = -32.807619953525176;
 const float b = -81.15865319571508;
 
-ESP8266WiFiMulti wifiMulti;
+ESP_WiFiManager ESP_wifiManager;
+
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
 
 void sendData(String subtopic, String data, bool retained) {
   Serial.println("SENDING: " + subtopic + ":" + data);
-  subtopic = MQTT_PREFIX + subtopic;
+  subtopic = config.mqttPrefix + subtopic;
   mqttClient.publish(subtopic.c_str(), data.c_str(), retained);
 }
 
@@ -42,7 +53,7 @@ void log(String line) {
   sendData("log", line, true);
 }
 
-void writeSettingsToEeprom() {
+void writeConfigToEeprom() {
   EEPROM.begin(sizeof(config));
   EEPROM.put(0, config);
   EEPROM.commit();
@@ -56,8 +67,9 @@ void reconnectMqtt() {
     // Attempt to connect
     // if you MQTT broker has clientID,username and password
     // please change following line to    if (client.connect(clientId,userName,passWord))
-    if (mqttClient.connect(deviceName, MQTT_USER, MQTT_PASSWORD)) {
+    if (mqttClient.connect(deviceName, config.mqttUser, config.mqttPassword)) {
       Serial.println("connected");
+      Serial.println("Subscribing to: " + commandPrefix);
       mqttClient.subscribe((commandPrefix + "/#").c_str());
       sendData("ip", WiFi.localIP().toString(), true);
       sendData("rssi", String(WiFi.RSSI()), true);
@@ -113,7 +125,7 @@ void handleNewSetTemp(int newSetTemp) {
   int delta = newSetTemp - config.tempSet;
   changeSetTemperature(delta);
   config.tempSet = newSetTemp;
-  writeSettingsToEeprom();
+  writeConfigToEeprom();
 }
 
 void handleNewPowerState(boolean newState) {
@@ -122,7 +134,7 @@ void handleNewPowerState(boolean newState) {
   } else {
     pressButton(BUTTON_POWER, true);
     config.powerState = newState;
-    writeSettingsToEeprom();
+    writeConfigToEeprom();
   }
 }
 
@@ -175,10 +187,10 @@ void callback(char *topic, byte *payload, unsigned int length) {
     handleNewSetTemp(plInt);
   } else if (strcmp(slashPointer + 1, "inittemp") == 0) {
     config.tempSet = plInt;
-    writeSettingsToEeprom();
+    writeConfigToEeprom();
   } else if (strcmp(slashPointer + 1, "initpwr") == 0) {
     config.powerState = plInt;
-    writeSettingsToEeprom();
+    writeConfigToEeprom();
   } else if (strcmp(slashPointer + 1, "pwr") == 0) {
     handleNewPowerState(plInt);
   } else {
@@ -190,18 +202,45 @@ void callback(char *topic, byte *payload, unsigned int length) {
 void setup() {
   Serial.begin(115200);
   Serial.println();
-  WiFi.mode(WIFI_STA);
+
+  // Read settings from EEPROM
+  EEPROM.begin(sizeof(config));
+  EEPROM.get(0, config);
+  EEPROM.end();
+  log("Config " + String(config.tempSet) + ":" + String(config.powerState) + " loaded from flash.");
+  //
+
   WiFi.hostname(deviceName);
-  wifiMulti.addAP(WIFI_SSID_1, WIFI_PSK_1);
-  wifiMulti.addAP(WIFI_SSID_2, WIFI_PSK_2);
-  while (wifiMulti.run() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("WiFi running...");
+
+  ESP_WMParameter p_mqttServer(MQTT_SERVER_LABEL, "MQTT Server", config.mqttServer, 30);
+  ESP_wifiManager.addParameter(&p_mqttServer);
+  ESP_WMParameter p_mqttUser(MQTT_USER_LABEL, "MQTT User", config.mqttUser, 30);
+  ESP_wifiManager.addParameter(&p_mqttUser);
+  ESP_WMParameter p_mqttPassword(MQTT_PASSWORD_LABEL, "MQTT Password", config.mqttPassword, 30);
+  ESP_wifiManager.addParameter(&p_mqttPassword);
+  ESP_WMParameter p_mqttPrefix(MQTT_PREFIX_LABEL, "MQTT Prefix", config.mqttPrefix, 30);
+  ESP_wifiManager.addParameter(&p_mqttPrefix);
+
+  ESP_wifiManager.setConfigPortalTimeout(60);
+  
+  ESP_wifiManager.setSaveConfigCallback([]() {
+    Serial.println("Should save config");
+    saveConfig = true;
+  });
+
+  ESP_wifiManager.autoConnect(STA_SSID, STA_PSK);
+  if (saveConfig) {
+    strcpy(config.mqttServer, p_mqttServer.getValue());
+    strcpy(config.mqttUser, p_mqttUser.getValue());
+    strcpy(config.mqttPassword, p_mqttPassword.getValue());
+    strcpy(config.mqttPrefix, p_mqttPrefix.getValue());
+    writeConfigToEeprom();
+    saveConfig = false;
   }
+
   ArduinoOTA.onStart([]() {
     log("Start OTA update");
   });
-
   ArduinoOTA.setHostname(deviceName);
   ArduinoOTA.begin();
 
@@ -212,16 +251,10 @@ void setup() {
   pinMode(LED, OUTPUT);
   digitalWrite(LED, HIGH);
 
-  mqttClient.setServer(MQTT_SERVER, 1883);
+  commandPrefix = config.mqttPrefix + String("cmnd");
+  mqttClient.setServer(config.mqttServer, 1883);
   mqttClient.setCallback(callback);
   reconnectMqtt();
-
-  // Read settings from EEPROM
-  EEPROM.begin(sizeof(config));
-  EEPROM.get(0, config);
-  EEPROM.end();
-  log("Config " + String(config.tempSet) + ":" + String(config.powerState) + " loaded from flash.");
-  //
 
   Serial.println("Setup finished, looping now");
 }
