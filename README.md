@@ -78,7 +78,7 @@ board.
 ## ToDo
 
 - [x] Calibrate temp measurements
-- [ ] Send temp only when changed
+- [x] Send temp only when changed
 - [ ] Use WiFi manager instead of fixed WiFi credentails
 - [ ] Use WiFi manager to set mqtt settings
 - [ ] Add soem pics here
