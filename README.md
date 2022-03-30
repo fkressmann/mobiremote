@@ -75,10 +75,16 @@ compressor. Maybe this is the reason why the measured voltage was so far off fro
 expect from a 10k NTC. Nobody knows exactly what kind of voltage divider Mobicool uses on the main
 board.
 
+
+## Result
+![p1](resources/p1.jpg)
+![p1](resources/p3.jpg)
+![p1](resources/p5.jpg)
+
 ## ToDo
 
 - [x] Calibrate temp measurements
 - [x] Send temp only when changed
 - [x] Use WiFi manager instead of fixed WiFi credentails
 - [x] Use WiFi manager to set mqtt settings
-- [ ] Add some pics here
+- [x] Add some pics here
