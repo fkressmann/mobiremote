@@ -20,6 +20,14 @@
 boolean saveConfig = false;
 
 const char *deviceName = "esp-mobiremote";
+
+const char *topicPower = "power";
+const char *topicTargetTemp = "target";
+const char *topicIsTemp = "temp";
+const char *topicInitTemp = "inittemp";
+const char *topicInitPower = "initpower";
+const char *topicStatus = "status";
+
 unsigned long ntcRead = 0;
 unsigned int ntcCount = 0;
 float prevTemp = 0;
@@ -51,6 +59,18 @@ void sendData(String subtopic, String data, bool retained) {
 
 void log(String line) {
   sendData("log", line, true);
+}
+
+void sendCurrentTargetTemp() {
+    sendData(topicTargetTemp, String(config.tempSet), false);
+}
+
+void sendCurrentPowerState() {
+    sendData(topicPower, String(config.powerState), false);
+}
+
+void sendCurrentTemperature() {
+    sendData(topicIsTemp, String(prevTemp), false);
 }
 
 void writeConfigToEeprom() {
@@ -126,6 +146,7 @@ void handleNewSetTemp(int newSetTemp) {
   changeSetTemperature(delta);
   config.tempSet = newSetTemp;
   writeConfigToEeprom();
+  sendCurrentTargetTemp();
 }
 
 void handleNewPowerState(boolean newState) {
@@ -136,6 +157,7 @@ void handleNewPowerState(boolean newState) {
     config.powerState = newState;
     writeConfigToEeprom();
   }
+  sendCurrentPowerState();
 }
 
 float adcToTemperature(float adcReading) {
@@ -155,8 +177,8 @@ void handleNtc() {
     float analogReading = (float)ntcRead / ntcCount;
     float temp = adcToTemperature(analogReading);
     if (abs(temp - prevTemp) >= 0.1) {
-      sendData("temp", String(temp, 1), false);
       prevTemp = temp;
+      sendCurrentTemperature();
     }
     ntcRead = 0;
     ntcCount = 0;
@@ -183,16 +205,20 @@ void callback(char *topic, byte *payload, unsigned int length) {
     sendInvalidCommandMessage(slashPointer, pl);
   }
 
-  if (strcmp(slashPointer + 1, "set") == 0) {
+  if (strcmp(slashPointer + 1, topicTargetTemp) == 0) {
     handleNewSetTemp(plInt);
-  } else if (strcmp(slashPointer + 1, "inittemp") == 0) {
+  } else if (strcmp(slashPointer + 1, topicInitTemp) == 0) {
     config.tempSet = plInt;
     writeConfigToEeprom();
-  } else if (strcmp(slashPointer + 1, "initpwr") == 0) {
+  } else if (strcmp(slashPointer + 1, topicInitPower) == 0) {
     config.powerState = plInt;
     writeConfigToEeprom();
-  } else if (strcmp(slashPointer + 1, "pwr") == 0) {
+  } else if (strcmp(slashPointer + 1, topicPower) == 0) {
     handleNewPowerState(plInt);
+  } else if (strcmp(slashPointer + 1, topicStatus) == 0) {
+    sendCurrentTemperature();
+    sendCurrentTargetTemp();
+    sendCurrentPowerState();
   } else {
     sendInvalidCommandMessage(slashPointer, pl);
   }

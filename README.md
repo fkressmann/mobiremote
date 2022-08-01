@@ -33,15 +33,18 @@ MQTT is used for communication.
 - ```{prefix}/rssi``` Signal strength of the WiFi (retained)
 - ```{prefix}/log``` Log (retained)
 - ```{prefix}/temp``` Current temperature every 1-2sek
+- ```{prefix}/target``` Reports back target temperature if set sucessfully
+- ```{prefix}/power``` Reports back target temperature if set sucessfully
 
 #### MQTT in
 
 All settings require a number as payload
 
 - ```{prefix}/cmnd/inittemp``` Set current target temperature (only for initialization)
-- ```{prefix}/cmnd/initpwr``` Set current power state (only for initialization)
-- ```{prefix}/cmnd/set``` Set target temperature
-- ```{prefix}/cmnd/pwr``` Set power state (turn on/off fridge)
+- ```{prefix}/cmnd/initpower``` Set current power state (only for initialization)
+- ```{prefix}/cmnd/target``` Set target temperature
+- ```{prefix}/cmnd/power``` Set power state (turn on/off fridge)
+- ```{prefix}/cmnd/status``` Output all configuration. Payload doesn't matter as long as it's specified
 
 ### Pressing buttons
 
