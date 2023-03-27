@@ -2,7 +2,7 @@
 #include <ArduinoOTA.h>
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>
-#include <ESP_WiFiManager.h>
+#include <WiFiManager.h>
 #include <PubSubClient.h>
 #include <credentials.h>
 
@@ -46,7 +46,7 @@ String commandPrefix;
 const float m = -32.807619953525176;
 const float b = -81.15865319571508;
 
-ESP_WiFiManager ESP_wifiManager;
+WiFiManager wifiManager;
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
@@ -176,6 +176,9 @@ void handleNtc() {
   } else {
     float analogReading = (float)ntcRead / ntcCount;
     float temp = adcToTemperature(analogReading);
+
+    // sendData(topicIsTemp, String(temp), false); //for debugging
+
     if (abs(temp - prevTemp) >= 0.1) {
       prevTemp = temp;
       sendCurrentTemperature();
@@ -237,24 +240,25 @@ void setup() {
   //
 
   WiFi.hostname(deviceName);
+  WiFi.persistent(true);
 
-  ESP_WMParameter p_mqttServer(MQTT_SERVER_LABEL, "MQTT Server", config.mqttServer, 30);
-  ESP_wifiManager.addParameter(&p_mqttServer);
-  ESP_WMParameter p_mqttUser(MQTT_USER_LABEL, "MQTT User", config.mqttUser, 30);
-  ESP_wifiManager.addParameter(&p_mqttUser);
-  ESP_WMParameter p_mqttPassword(MQTT_PASSWORD_LABEL, "MQTT Password", config.mqttPassword, 30);
-  ESP_wifiManager.addParameter(&p_mqttPassword);
-  ESP_WMParameter p_mqttPrefix(MQTT_PREFIX_LABEL, "MQTT Prefix", config.mqttPrefix, 30);
-  ESP_wifiManager.addParameter(&p_mqttPrefix);
+  WiFiManagerParameter p_mqttServer(MQTT_SERVER_LABEL, "MQTT Server", config.mqttServer, 30);
+  wifiManager.addParameter(&p_mqttServer);
+  WiFiManagerParameter p_mqttUser(MQTT_USER_LABEL, "MQTT User", config.mqttUser, 30);
+  wifiManager.addParameter(&p_mqttUser);
+  WiFiManagerParameter p_mqttPassword(MQTT_PASSWORD_LABEL, "MQTT Password", config.mqttPassword, 30);
+  wifiManager.addParameter(&p_mqttPassword);
+  WiFiManagerParameter p_mqttPrefix(MQTT_PREFIX_LABEL, "MQTT Prefix", config.mqttPrefix, 30);
+  wifiManager.addParameter(&p_mqttPrefix);
 
-  ESP_wifiManager.setConfigPortalTimeout(60);
+  wifiManager.setConfigPortalTimeout(60);
   
-  ESP_wifiManager.setSaveConfigCallback([]() {
+  wifiManager.setSaveConfigCallback([]() {
     Serial.println("Should save config");
     saveConfig = true;
   });
 
-  ESP_wifiManager.autoConnect(STA_SSID, STA_PSK);
+  wifiManager.autoConnect(STA_SSID, STA_PSK);
   if (saveConfig) {
     strcpy(config.mqttServer, p_mqttServer.getValue());
     strcpy(config.mqttUser, p_mqttUser.getValue());
