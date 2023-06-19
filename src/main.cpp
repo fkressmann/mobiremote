@@ -4,20 +4,25 @@
 #include <ESP8266WiFi.h>
 #include <WiFiManager.h>
 #include <PubSubClient.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
 #include <credentials.h>
 
-#define BUTTON_POWER D6
-#define BUTTON_SET D7
-#define BUTTON_UP D2
-#define BUTTON_DOWN D3
-#define NTC A0
+#define MCF_POWER D6
+#define MCF_SET D7
+#define MCF_UP D2
+#define MCF_DOWN D3
+#define BUTTON D5
+#define ONE_WIRE_BUS D1
 #define LED D4
 
 #define MQTT_SERVER_LABEL "mq_server"
 #define MQTT_USER_LABEL "mq_user"
 #define MQTT_PASSWORD_LABEL "mq_pw"
 #define MQTT_PREFIX_LABEL "mq_pref"
-boolean saveConfig = false;
+
+volatile boolean saveConfig = false;
+volatile boolean buttonPressed = false;
 
 const char *deviceName = "esp-mobiremote";
 
@@ -28,8 +33,6 @@ const char *topicInitTemp = "inittemp";
 const char *topicInitPower = "initpower";
 const char *topicStatus = "status";
 
-unsigned long ntcRead = 0;
-unsigned int ntcCount = 0;
 float prevTemp = 0;
 struct {
   int tempSet;
@@ -41,15 +44,13 @@ struct {
 } config;
 String commandPrefix;
 
-// linear approximation coefficents to this chips ADC charactersitics |(optimized for +10° - 0°C)
-// Allows accuracy up to 0.1°C
-const float m = -32.807619953525176;
-const float b = -81.15865319571508;
-
 WiFiManager wifiManager;
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
+
+OneWire oneWire(ONE_WIRE_BUS);
+DallasTemperature DS18B20(&oneWire);
 
 void sendData(String subtopic, String data, bool retained) {
   Serial.println("SENDING: " + subtopic + ":" + data);
@@ -119,14 +120,14 @@ void changeSetTemperature(int delta) {
   if (delta == 0) {
     return;
   }
-  pressButton(BUTTON_SET);
+  pressButton(MCF_SET);
   if (delta < 0) {
     for (int i = 0; i > delta; i--) {
-      pressButton(BUTTON_DOWN);
+      pressButton(MCF_DOWN);
     }
   } else {
     for (int i = 0; i < delta; i++) {
-      pressButton(BUTTON_UP);
+      pressButton(MCF_UP);
     }
   }
   // wait for mobicool to exit temperature menu before doing anything else
@@ -138,7 +139,7 @@ void handleNewSetTemp(int newSetTemp) {
     log("Cannot set temp, mobicool is off");
     return;
   }
-  if (newSetTemp == config.tempSet || newSetTemp < -10 || newSetTemp > 20) {
+  if (newSetTemp == config.tempSet || newSetTemp < -10 || newSetTemp > 10) {
     log("Bad newTemp: " + String(newSetTemp) + " (oldTemp: " + String(config.tempSet) + ")");
     return;
   }
@@ -153,38 +154,19 @@ void handleNewPowerState(boolean newState) {
   if (config.powerState == newState) {
     log("Power is already " + String(newState));
   } else {
-    pressButton(BUTTON_POWER, true);
+    pressButton(MCF_POWER, true);
     config.powerState = newState;
     writeConfigToEeprom();
   }
   sendCurrentPowerState();
 }
 
-float adcToTemperature(float adcReading) {
-  // 3.3v / 1024 (10bit ADC)
-  float voltage = (0.00322265625 * adcReading);
-  // sendData("voltage", String(voltage, 4), false); //for calibration reasons
-  float temp = (m * voltage) - b;
-  return temp;
-}
-
 void handleNtc() {
-  if (ntcCount < 1000) {
-    yield();
-    ntcRead += analogRead(NTC);
-    ntcCount += 1;
-  } else {
-    float analogReading = (float)ntcRead / ntcCount;
-    float temp = adcToTemperature(analogReading);
-
-    // sendData(topicIsTemp, String(temp), false); //for debugging
-
-    if (abs(temp - prevTemp) >= 0.1) {
-      prevTemp = temp;
-      sendCurrentTemperature();
-    }
-    ntcRead = 0;
-    ntcCount = 0;
+  DS18B20.requestTemperatures();
+  float temp = DS18B20.getTempCByIndex(0);
+  if (abs(temp - prevTemp) >= 0.1) {
+    prevTemp = temp;
+    sendCurrentTemperature();
   }
 }
 
@@ -213,9 +195,11 @@ void callback(char *topic, byte *payload, unsigned int length) {
   } else if (strcmp(slashPointer + 1, topicInitTemp) == 0) {
     config.tempSet = plInt;
     writeConfigToEeprom();
+    sendCurrentTargetTemp();
   } else if (strcmp(slashPointer + 1, topicInitPower) == 0) {
     config.powerState = plInt;
     writeConfigToEeprom();
+    sendCurrentPowerState();
   } else if (strcmp(slashPointer + 1, topicPower) == 0) {
     handleNewPowerState(plInt);
   } else if (strcmp(slashPointer + 1, topicStatus) == 0) {
@@ -228,16 +212,30 @@ void callback(char *topic, byte *payload, unsigned int length) {
   digitalWrite(LED, HIGH);
 }
 
+void startConfigPortal() {
+  WiFi.disconnect();
+  ESP.restart();
+}
+
+void IRAM_ATTR buttonIsr() {
+  buttonPressed = true;
+}
+
 void setup() {
   Serial.begin(115200);
   Serial.println();
+
+  attachInterrupt(digitalPinToInterrupt(BUTTON), buttonIsr, FALLING);
 
   // Read settings from EEPROM
   EEPROM.begin(sizeof(config));
   EEPROM.get(0, config);
   EEPROM.end();
   log("Config " + String(config.tempSet) + ":" + String(config.powerState) + " loaded from flash.");
-  //
+  Serial.printf("MQTT server: %s \n", config.mqttServer);
+  Serial.printf("MQTT user: %s \n", config.mqttUser);
+  Serial.printf("MQTT password: %s \n", config.mqttPassword);
+  Serial.printf("MQTT prefix: %s \n", config.mqttPrefix);
 
   WiFi.hostname(deviceName);
   WiFi.persistent(true);
@@ -274,26 +272,35 @@ void setup() {
   ArduinoOTA.setHostname(deviceName);
   ArduinoOTA.begin();
 
-  pinMode(BUTTON_POWER, OUTPUT);
-  pinMode(BUTTON_SET, OUTPUT);
-  pinMode(BUTTON_UP, OUTPUT);
-  pinMode(BUTTON_DOWN, OUTPUT);
+  pinMode(MCF_POWER, OUTPUT);
+  pinMode(MCF_SET, OUTPUT);
+  pinMode(MCF_UP, OUTPUT);
+  pinMode(MCF_DOWN, OUTPUT);
+  pinMode(BUTTON, INPUT_PULLUP);
   pinMode(LED, OUTPUT);
   digitalWrite(LED, HIGH);
+
+  DS18B20.begin();
 
   commandPrefix = config.mqttPrefix + String("cmnd");
   mqttClient.setServer(config.mqttServer, 1883);
   mqttClient.setCallback(callback);
   reconnectMqtt();
 
+  // Init values in MQTT
+  sendCurrentTemperature();
+  sendCurrentTargetTemp();
+  sendCurrentPowerState();
+
   Serial.println("Setup finished, looping now");
 }
 
 void loop() {
+  if (buttonPressed) startConfigPortal();
   ArduinoOTA.handle();
   reconnectMqtt();
   mqttClient.loop();
-  if (millis() % 10 == 0) {
+  if (millis() % 1000 == 0) {
     handleNtc();
   }
 }

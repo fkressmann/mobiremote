@@ -62,6 +62,7 @@ Didn't want so spend too much time reverse engineering that.
 
 ### Measuring temp
 
+<del>
 Furthermore, I realized that the fridge uses a 10k NTC for temperature measurement and connected
 this one to the ESP, too to measure the inside temperature (previously, I had a DS18B20 inside and a
 ribbon cable to through the lid).
@@ -77,6 +78,10 @@ I did not disconnect the ADC from the main controller because it is used for con
 compressor. Maybe this is the reason why the measured voltage was so far off from what one would
 expect from a 10k NTC. Nobody knows exactly what kind of voltage divider Mobicool uses on the main
 board.
+</del>
+
+Forget this, this is for whatever reason way to unreliable. I ended up mounting a DS18B20 inside the box, using flex 
+cables to pass through the hinge and ran wires through the cooling holes. Works way better now.
 
 
 ## Result
@@ -88,6 +93,6 @@ board.
 
 - [x] Calibrate temp measurements
 - [x] Send temp only when changed
-- [x] Use WiFi manager instead of fixed WiFi credentails
+- [x] Use WiFi manager instead of fixed WiFi credentials
 - [x] Use WiFi manager to set mqtt settings
 - [x] Add some pics here
