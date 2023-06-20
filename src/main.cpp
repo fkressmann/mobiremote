@@ -288,7 +288,7 @@ void setup() {
   reconnectMqtt();
 
   // Init values in MQTT
-  sendCurrentTemperature();
+  log("Startup complete");
   sendCurrentTargetTemp();
   sendCurrentPowerState();
 
