@@ -256,7 +256,10 @@ void setup() {
     saveConfig = true;
   });
 
-  wifiManager.autoConnect(STA_SSID, STA_PSK);
+  boolean connected = false;
+  while (!connected) {
+    connected = wifiManager.autoConnect(STA_SSID, STA_PSK);
+  }
   if (saveConfig) {
     strcpy(config.mqttServer, p_mqttServer.getValue());
     strcpy(config.mqttUser, p_mqttUser.getValue());
